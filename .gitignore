@@ -1,0 +1,14 @@
+# Whitelist: only code is versioned.
+# Tests, configs, data, models, live outputs and logs stay local.
+/*
+!/.gitignore
+!/README.md
+!/pyproject.toml
+!/uv.lock
+!/scripts/
+/scripts/*
+!/scripts/*.py
+!/scripts/*.sh
+/scripts/sync_masterdata_*
+__pycache__/
+.DS_Store
