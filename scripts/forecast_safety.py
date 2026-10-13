@@ -8,6 +8,9 @@ def reference(row):
               ('shape_first_prediction', 'hybrid_projection', 'pace_6h_projection')]
     if row.get("opening_prior_applied"):
         values.append(float(row.get("opening_prior_score") or current))
+    if row.get("opening_blend_reference"):
+        # Historical-board estimate; without it the guard would cap the layer back to the chain.
+        values.append(float(row["opening_blend_reference"]))
     return max([current]+[v for v in values if math.isfinite(v)])
 
 

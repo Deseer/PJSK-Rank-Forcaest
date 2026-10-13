@@ -285,6 +285,8 @@ def env_from_config(config: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
     if config.get("shape_live_model_pkl"):
         env["HARUKI_FORECAST_SHAPE_LIVE_MODEL"] = str(Path(config["shape_live_model_pkl"]))
+    if config.get("opening_blend_file") and config.get("opening_blend_enabled", True):
+        env["HARUKI_FORECAST_OPENING_BLEND"] = str(Path(config["opening_blend_file"]))
     if config.get("live_heat_enabled"):
         # mid/late hierarchical live-heat correction layer, see
         # analysis/offline_intrinsic_live/STRATEGY.md and scripts/live_heat_layer.py
@@ -464,6 +466,16 @@ def train(config: dict[str, Any]) -> None:
         finally:
             shape_config.unlink(missing_ok=True)
 
+    if config.get("opening_blend_file"):
+        opening_config = results_dir / ".opening-blend-training-config.json"
+        write_json(opening_config, config)
+        try:
+            run_command([sys.executable, str(REPO_ROOT / "scripts" / "train_opening_blend.py"),
+                         "--config", str(opening_config), "--output", str(config["opening_blend_file"])],
+                        env=env_from_config(config))
+        finally:
+            opening_config.unlink(missing_ok=True)
+
 
 PREDICTION_RECORD_FIELDS = [
     "shape_live_version",
@@ -547,6 +559,14 @@ PREDICTION_RECORD_FIELDS = [
     "median_heat_reference_count",
     "median_heat_prediction",
     "median_heat_blend_weight",
+    "opening_blend_version",
+    "opening_blend_prediction",
+    "opening_blend_weight",
+    "opening_blend_chain_prediction",
+    "opening_blend_prior",
+    "opening_blend_shape",
+    "opening_blend_interpolated",
+    "opening_blend_cross_server_heat",
 ]
 
 
@@ -654,6 +674,7 @@ def append_prediction_record_rows(
                 "regional_shape_weight": item.get("regional_shape_weight"),
                 "regional_shape_event_count": item.get("regional_shape_event_count"),
                 **{key: item.get(key) for key in PREDICTION_RECORD_FIELDS if key.startswith("median_heat_")},
+                **{key: item.get(key) for key in PREDICTION_RECORD_FIELDS if key.startswith("opening_blend_")},
             })
     return path
 

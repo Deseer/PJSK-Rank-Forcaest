@@ -2510,6 +2510,22 @@ def main() -> int:
                                                       line_start, line_end, current_wall_timestamp, rank_history)
         if count:
             model_name += "+" + shape_live_payload["version"]
+    opening_blend_summary = None
+    opening_blend_path = os.environ.get("HARUKI_FORECAST_OPENING_BLEND")
+    if opening_blend_path and Path(opening_blend_path).exists():
+        import opening_blend
+        opening_artifact = opening_blend.load(opening_blend_path)
+        opening_context = adjustment_event_feature_contexts.get((args.region, args.event_id))
+        count = opening_blend.apply(opening_artifact, predictions, args.region, args.event_id,
+                                    lambda character_id: module.event_line_window(live_meta, character_id),
+                                    opening_context.condition if opening_context else "other",
+                                    list(opening_context.unit_labels) if opening_context else [],
+                                    current_wall_timestamp, len(live_meta.chapter_windows))
+        opening_blend_summary = {"version": opening_artifact["version"], "lines": count,
+                                 "built_at": opening_artifact.get("built_at"),
+                                 "training_events": opening_artifact.get("events")}
+        if count:
+            model_name += "+" + opening_artifact["version"]
     if shape_live_summary is not None and shape_live_summary["lines"] and shape_live_summary["rank_reconciliation"] == "isotonic":
         from shape_live_model import reconcile as shape_live_reconcile
         shape_live_reconcile(predictions)
@@ -2580,6 +2596,8 @@ def main() -> int:
         payload["shape_live"] = shape_live_summary
     if segmented_heat_summary is not None:
         payload["segmented_heat"] = segmented_heat_summary
+    if opening_blend_summary is not None:
+        payload["opening_blend"] = opening_blend_summary
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
