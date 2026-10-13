@@ -2,7 +2,7 @@
 
 The main model never sees progress below 5% and extrapolates badly there; World Link
 boards are underestimated well into their second half. This layer estimates the final
-score from two causal sources and hands over to the existing chain as boards mature:
+score from two causal sources and blends it into the chain's output as boards mature:
 
 * prior: duration-adjusted finals of earlier boards of the same kind at the same
   region/rank. Normal events match box/mixed and unit, and outside JP add the relative
@@ -43,6 +43,7 @@ STALE_SECONDS = 1800
 # rank should not hand that rank back to the chain in the opening.
 APPLY_MAX_AGE_SECONDS = 6 * 3600
 # Weight against the existing chain: full until the first value, then linear to zero.
+# Since the 2026-10-12 retrain the chain is as good as history late in normal events.
 HANDOFF = {NORMAL: (0.10, 0.35), CHAPTER: (0.90, 1.00), TOTAL: (0.75, 1.00)}
 # CN normal events keep an ensemble with their own opening layers and shape residual model.
 REGION_WEIGHT_CAP = {"cn": 0.7}
@@ -412,7 +413,7 @@ def apply(artifact, rows, region, event_id, window, condition, units, now, chapt
         current = float(row["current_score"])
         chain = max(float(row["model_prediction"]), current, 1.0)
         final = max(current, math.exp(weight * math.log(max(value, 1.0)) + (1 - weight) * math.log(chain)))
-        row.update(opening_blend_version=VERSION, opening_blend_prediction=value, opening_blend_reference=value,
+        row.update(opening_blend_version=VERSION, opening_blend_prediction=value,
                    opening_blend_weight=weight, opening_blend_chain_prediction=chain)
         factors.setdefault(char, {})[int(row["rank"])] = math.log(final / chain)
         row["model_prediction"] = row["pressure_adjusted_prediction"] = final
@@ -436,14 +437,31 @@ def apply(artifact, rows, region, event_id, window, condition, units, now, chapt
         chain = max(float(row["model_prediction"]), current, 1.0)
         final = max(current, chain * math.exp(factor))
         row.update(opening_blend_version=VERSION, opening_blend_interpolated=True,
-                   opening_blend_chain_prediction=chain, opening_blend_reference=final)
+                   opening_blend_chain_prediction=chain)
         row["model_prediction"] = row["pressure_adjusted_prediction"] = final
+    reconcile(rows, set(factors))
     for row in rows:
         if row.get("opening_blend_version"):
             # The chain's model interval does not describe this estimate.
             for key in ("prediction_p10", "prediction_p50", "prediction_p90"):
                 row[key] = None
+            hours = max(0.0, (float(row.get("end_timestamp") or 0) - float(row.get("current_timestamp") or 0)) / 3600)
+            row["forecast_required_pace"] = ((row["model_prediction"] - float(row.get("current_score") or 0)) / hours
+                                             if hours else None)
     return sum(len(v) for v in factors.values())
+
+
+def reconcile(rows, characters):
+    """A better rank never ends below a worse one. No caps: the chain applied its own before."""
+    for char in characters:
+        floor = 0.0
+        group = [r for r in rows if int(r.get("character_id") or 0) == char and not r.get("event_finished_prediction")]
+        for row in sorted(group, key=lambda r: int(r["rank"]), reverse=True):
+            value = float(row["model_prediction"])
+            if value < floor:
+                row["model_prediction"] = row["pressure_adjusted_prediction"] = floor
+                row["opening_blend_rank_floor"] = floor
+            floor = max(floor, float(row["model_prediction"]))
 
 
 def load(path):

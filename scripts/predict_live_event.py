@@ -2510,22 +2510,6 @@ def main() -> int:
                                                       line_start, line_end, current_wall_timestamp, rank_history)
         if count:
             model_name += "+" + shape_live_payload["version"]
-    opening_blend_summary = None
-    opening_blend_path = os.environ.get("HARUKI_FORECAST_OPENING_BLEND")
-    if opening_blend_path and Path(opening_blend_path).exists():
-        import opening_blend
-        opening_artifact = opening_blend.load(opening_blend_path)
-        opening_context = adjustment_event_feature_contexts.get((args.region, args.event_id))
-        count = opening_blend.apply(opening_artifact, predictions, args.region, args.event_id,
-                                    lambda character_id: module.event_line_window(live_meta, character_id),
-                                    opening_context.condition if opening_context else "other",
-                                    list(opening_context.unit_labels) if opening_context else [],
-                                    current_wall_timestamp, len(live_meta.chapter_windows))
-        opening_blend_summary = {"version": opening_artifact["version"], "lines": count,
-                                 "built_at": opening_artifact.get("built_at"),
-                                 "training_events": opening_artifact.get("events")}
-        if count:
-            model_name += "+" + opening_artifact["version"]
     if shape_live_summary is not None and shape_live_summary["lines"] and shape_live_summary["rank_reconciliation"] == "isotonic":
         from shape_live_model import reconcile as shape_live_reconcile
         shape_live_reconcile(predictions)
@@ -2565,6 +2549,24 @@ def main() -> int:
             row['forecast_required_pace']=(row['model_prediction']-row['current_score'])/remaining_hours if remaining_hours else None
             ceilings[char]=row['model_prediction']
 
+    # After live speed and the WL guard: those act on the chain, this layer blends in the
+    # history estimate, so speed caps cannot hold back the opening or the final sprint.
+    opening_blend_summary = None
+    opening_blend_path = os.environ.get("HARUKI_FORECAST_OPENING_BLEND")
+    if opening_blend_path and Path(opening_blend_path).exists():
+        import opening_blend
+        opening_artifact = opening_blend.load(opening_blend_path)
+        opening_context = adjustment_event_feature_contexts.get((args.region, args.event_id))
+        count = opening_blend.apply(opening_artifact, predictions, args.region, args.event_id,
+                                    lambda character_id: module.event_line_window(live_meta, character_id),
+                                    opening_context.condition if opening_context else "other",
+                                    list(opening_context.unit_labels) if opening_context else [],
+                                    current_wall_timestamp, len(live_meta.chapter_windows))
+        opening_blend_summary = {"version": opening_artifact["version"], "lines": count,
+                                 "built_at": opening_artifact.get("built_at"),
+                                 "training_events": opening_artifact.get("events")}
+        if count:
+            model_name += "+" + opening_artifact["version"]
     median_heat_enabled = bool(payload.get("median_heat_settings", {}).get("enabled", False))
     payload = {
         "generated_at": current_wall_timestamp,

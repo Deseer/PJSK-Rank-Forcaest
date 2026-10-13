@@ -8,9 +8,6 @@ def reference(row):
               ('shape_first_prediction', 'hybrid_projection', 'pace_6h_projection')]
     if row.get("opening_prior_applied"):
         values.append(float(row.get("opening_prior_score") or current))
-    if row.get("opening_blend_reference"):
-        # Historical-board estimate; without it the guard would cap the layer back to the chain.
-        values.append(float(row["opening_blend_reference"]))
     return max([current]+[v for v in values if math.isfinite(v)])
 
 
@@ -32,7 +29,9 @@ def protect(rows, previous=(), elapsed=None):
                 and prior.get('forecast_safety_policy') == 'wl_guard_v1'):
             # Actual pace/shape acceleration passes through, calibration-only jumps do not.
             ratio = max(1., base / max(reference(prior), 1.))
-            temporal = (float(prior['model_prediction']) * ratio
+            # Compare with the previous chain value; the opening blend runs after this guard.
+            previous_chain = float(prior.get('opening_blend_chain_prediction') or prior['model_prediction'])
+            temporal = (previous_chain * ratio
                         * math.exp(math.log(1.03)*elapsed/300)
                         + max(0., c-float(prior['current_score'])))
             cap = min(cap, max(c, temporal))
