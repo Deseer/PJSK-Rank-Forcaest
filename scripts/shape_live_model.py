@@ -11,6 +11,7 @@ WINDOWS=(1,6,24,48)
 REGIONS=('jp','en','tw','kr','cn')
 UNITS=('light_sound','idol','street','theme_park','school_refusal')
 OFFSETS={'jp':9,'en':0,'tw':8,'kr':9,'cn':8}
+MAX_CHAIN_RATIO=1.25
 
 
 def reference_observation(line,boundary):
@@ -141,7 +142,11 @@ def predict_rows(payload,region,event,start,end,now,history,rows):
     matrix=np.asarray(vectors);base=np.where(np.isfinite(matrix[:,75]),matrix[:,75],0.)
     growth=np.clip(payload['model'].predict(matrix)+base,0,12)
     for row,g in zip(selected,growth):
-        value=max(float(row['current_score']),float(row['current_score'])*math.exp(float(g)))
+        raw=float(row['current_score'])*math.exp(float(g))
+        # The residual is a correction to the chain, not a replacement: CN 182 showed 2-3x spikes at T100/T300.
+        chain=float(row['model_prediction'])
+        value=max(float(row['current_score']),min(max(raw,chain/MAX_CHAIN_RATIO),chain*MAX_CHAIN_RATIO))
+        row['shape_live_raw_prediction']=raw
         row['previous_chain_prediction']=row['model_prediction']
         row['model_prediction']=row['pressure_adjusted_prediction']=value
         row['shape_live_prediction']=value
