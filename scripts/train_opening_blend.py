@@ -24,6 +24,12 @@ def collect_lines(config):
     legacy = module.load_legacy_event_files(data_root, normalized)
     ranks = set(module.COMMON_RANKS) | {int(r) for r in config.get("event_tracker", {}).get("ranks", [])}
     horizon = (ob.GRID_HOURS[-1] + 1) * 3600
+    assets = {}
+    for region in module.REGIONS:
+        path = module.MASTERDATA_ROOTS[region] / "events.json"
+        if path.exists():
+            for event in module.load_json(path):
+                assets[(region, int(event["id"]))] = event.get("assetbundleName")
     lines = {}
 
     def add(region, event_id, char, rank, t, score):
@@ -53,7 +59,8 @@ def collect_lines(config):
         if line is None:
             ctx = contexts.get((region, event_id))
             line = lines[key] = {"kind": kind, "start": start, "end": end, "chapters": len(em.chapter_windows),
-                                 "condition": ctx.condition if ctx else "other",
+                                 "condition": ob.event_condition(ctx.condition if ctx else "other",
+                                                                 assets.get((region, event_id))),
                                  "units": list(ctx.unit_labels) if ctx else [], "points": {}, "final": None}
         if line["final"] is None or t >= line["final"][0]:
             line["final"] = (t, score)

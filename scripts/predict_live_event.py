@@ -2557,9 +2557,12 @@ def main() -> int:
         import opening_blend
         opening_artifact = opening_blend.load(opening_blend_path)
         opening_context = adjustment_event_feature_contexts.get((args.region, args.event_id))
+        opening_asset = next((row.get("assetbundleName") for row in module.load_json(module.MASTERDATA_ROOTS[args.region] / "events.json")
+                              if int(row["id"]) == args.event_id), None)
         count = opening_blend.apply(opening_artifact, predictions, args.region, args.event_id,
                                     lambda character_id: module.event_line_window(live_meta, character_id),
-                                    opening_context.condition if opening_context else "other",
+                                    opening_blend.event_condition(opening_context.condition if opening_context else "other",
+                                                                  opening_asset),
                                     list(opening_context.unit_labels) if opening_context else [],
                                     current_wall_timestamp, len(live_meta.chapter_windows))
         opening_blend_summary = {"version": opening_artifact["version"], "lines": count,

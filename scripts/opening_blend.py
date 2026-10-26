@@ -47,6 +47,13 @@ APPLY_MAX_AGE_SECONDS = 6 * 3600
 HANDOFF = {NORMAL: (0.10, 0.35), CHAPTER: (0.90, 1.00), TOTAL: (0.75, 1.00)}
 # CN normal events keep an ensemble with their own opening layers and shape residual model.
 REGION_WEIGHT_CAP = {"cn": 0.7}
+# Unit "Memories" events (JP 221 onward) are 4-day reruns whose finals run 2-3x a box event of the
+# same unit (JP 221 T1000 22.0M vs JP 220 8.0M over 7 days). They only learn from each other.
+MEMORIES = "memories"
+
+
+def event_condition(condition, asset):
+    return MEMORIES if str(asset or "").startswith("event_memories_") else condition
 
 
 def point_slot(elapsed_seconds):
@@ -143,7 +150,7 @@ def jp_heat(index, event, rank, start):
         return None
     neighbours = [per_day(index["jp"][(e, rank)]) for e in index["jp_events"]
                   if event - CROSS_SERVER_NEIGHBOURS <= e < event and (e, rank) in index["jp"]
-                  and line_end(index["jp"][(e, rank)]) < start]
+                  and line_end(index["jp"][(e, rank)]) < start and index["jp"][(e, rank)]["c"] != MEMORIES]
     if len(neighbours) < MIN_EVENTS:
         return None
     return per_day(same) - statistics.median(neighbours)
@@ -173,7 +180,16 @@ def prior_and_shape(index, kind, region, event, rank, start, duration, condition
     pool = [v for v in index["own"].get((region, kind, rank), ()) if line_end(v) < start]
     events = {v["e"] for v in pool}
     debug = {}
-    if kind == NORMAL:
+    minimum = MIN_EVENTS
+    if kind == NORMAL and condition == MEMORIES:
+        donors = [v for v in pool if v["c"] == MEMORIES][-CONDITION_DONORS:]
+        if not donors:
+            return None, None, debug  # the first one in a region stays with the chain
+        log_prior = statistics.median(math.log(v["f"] * duration / v["d"]) for v in donors)
+        minimum = 1
+    elif kind == NORMAL:
+        pool = [v for v in pool if v["c"] != MEMORIES]
+        events = {v["e"] for v in pool}
         if len(events) < MIN_EVENTS:
             return None, None, debug
         same = [v for v in pool if v["c"] == condition]
@@ -207,10 +223,10 @@ def prior_and_shape(index, kind, region, event, rank, start, duration, condition
     shape = None
     if score and score > 0:
         rates = growth(donors, elapsed, duration)
-        if len(rates) < MIN_EVENTS and kind != NORMAL:
+        if len(rates) < minimum and kind != NORMAL:
             rates = pooled_growth(index, kind, rank, start, duration, chapters, elapsed)
             debug["opening_blend_shape_pooled"] = True
-        if len(rates) >= MIN_EVENTS:
+        if len(rates) >= minimum:
             shape = score * math.exp(statistics.median(rates))
         debug["opening_blend_shape_events"] = len(rates)
     return math.exp(log_prior), shape, debug
