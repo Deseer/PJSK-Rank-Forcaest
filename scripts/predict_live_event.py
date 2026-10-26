@@ -2567,6 +2567,12 @@ def main() -> int:
                                  "training_events": opening_artifact.get("events")}
         if count:
             model_name += "+" + opening_artifact["version"]
+    rank_smoothing_count = 0
+    if event_series_type == "normal" and os.environ.get("HARUKI_FORECAST_RANK_SMOOTHING", "1") != "0":
+        import rank_smoothing
+        rank_smoothing_count = rank_smoothing.apply(predictions)
+        if rank_smoothing_count:
+            model_name += "+" + rank_smoothing.VERSION
     median_heat_enabled = bool(payload.get("median_heat_settings", {}).get("enabled", False))
     payload = {
         "generated_at": current_wall_timestamp,

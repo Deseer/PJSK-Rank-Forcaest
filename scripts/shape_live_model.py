@@ -12,6 +12,7 @@ REGIONS=('jp','en','tw','kr','cn')
 UNITS=('light_sound','idol','street','theme_park','school_refusal')
 OFFSETS={'jp':9,'en':0,'tw':8,'kr':9,'cn':8}
 MAX_CHAIN_RATIO=1.25
+MAX_STALE_SECONDS=6*3600
 
 
 def reference_observation(line,boundary):
@@ -126,17 +127,29 @@ def predict_rows(payload,region,event,start,end,now,history,rows):
         if char==0:
             value=live_observation(points,now)
             if value:cross[rank]=value[1]
+    def cross_at(t):
+        out={}
+        for (char,rank),points in history.items():
+            value=live_observation(points,t) if char==0 else None
+            if value:out[rank]=value[1]
+        return out
     vectors=[];selected=[]
     for row in rows:
         if row.get('synthetic_rank') or row.get('event_finished_prediction') or row.get('character_id')!=0:continue
-        points=history.get((0,int(row['rank'])),[]);current=live_observation(points,now)
-        if not current:continue
-        wall=(now-start)/(end-start)
+        points=history.get((0,int(row['rank'])),[]);current=live_observation(points,now);row_now=now;row_cross=cross
+        if not current:
+            # The tracker often misses T100/T200 for an hour or more. Skipping the row then flips the
+            # public value between the chain and this layer, so evaluate as of the last observation.
+            i=bisect.bisect_right(points,(now,float('inf')))-1
+            if i<0 or now-points[i][0]>MAX_STALE_SECONDS:continue
+            current=points[i];row_now=current[0];row_cross=cross_at(row_now)
+            row['shape_live_observed_at']=row_now
+        wall=(row_now-start)/(end-start)
         if not .005-2/(end-start)<=wall<=.90+2/(end-start):continue
         line=dict(region=region,event=event,rank=int(row['rank']),start=start,end=end,
                   condition=context.get('condition','other'),units=context.get('units',[]))
-        earlier={h:live_observation(points,now-h*3600) for h in WINDOWS}
-        vector=features(payload,line,now,current,cross,earlier)
+        earlier={h:live_observation(points,row_now-h*3600) for h in WINDOWS}
+        vector=features(payload,line,row_now,current,row_cross,earlier)
         if vector is not None:vectors.append(vector);selected.append(row)
     if not vectors:return 0
     matrix=np.asarray(vectors);base=np.where(np.isfinite(matrix[:,75]),matrix[:,75],0.)
